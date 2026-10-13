@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Linear Regression | Sales Forecaster{% endblock %}
+{% block page_title %}Linear Regression Model Estimation{% endblock %}
+
+{% block topbar_actions %}
+  <a href="{{ url_for('analysis.view_analysis', analysis_id=analysis.id) }}" class="btn btn-secondary btn-sm">
+    &larr; Back to Analysis
+  </a>
+  <a href="{{ url_for('forecast.view_forecast', analysis_id=analysis.id) }}" class="btn btn-primary btn-sm" id="btnGoForecast">
+    Proceed to Forecasting &rarr;
+  </a>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+  <div>
+    <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">
+      OLS Linear Regression &bull; <span style="color: var(--primary);">{{ analysis.title }}</span>
+    </h2>
+    <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+      Using Scikit-learn LinearRegression &bull; Dataset: {{ analysis.dataset_filename }} ({{ analysis.row_count }} records)
+    </p>
+  </div>
+</div>
+
+<!-- Model Configuration Panel -->
+<div class="panel">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">1. Model Specification & Splitting Protocol</div>
+      <div class="panel-subtitle">Select variables and configure strict train/test partition to prevent data leakage</div>
+    </div>
+    <span class="badge badge-primary">Scikit-learn OLS</span>
+  </div>
+  <div class="panel-body">
+    <form id="regressionForm">
+      <input type="hidden" id="analysisId" value="{{ analysis.id }}">
+
+      <div class="grid-2">
+        <!-- Target Variable -->
+        <div class="form-group">
+          <label class="form-label" for="targetVar">
+            Target Variable (Dependent Variable <i>y</i>) <span style="color: var(--danger);">*</span>
+          </label>
+          <select id="targetVar" class="form-select" required>
+            {% for col in numeric_columns %}
+              <option value="{{ col }}" {% if col == default_target %}selected{% endif %}>{{ col }}</option>
+            {% endfor %}
+          </select>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+            The continuous numerical metric you wish to model and forecast.
+          </div>
+        </div>
+
+        <!-- Partition Strategy -->
+        <div class="form-group">
+          <label class="form-label" for="splitType">
+            Train/Test Splitting Strategy
+          </label>
+          <select id="splitType" class="form-select">
+            {% if has_date %}
+              <option value="chronological" selected>Chronological Split (Recommended for temporal data to avoid lookahead leakage)</option>
+              <option value="random">Random Split (Shuffled)</option>
+            {% else %}
+              <option value="random" selected>Random Split (No date detected)</option>
+              <option value="chronological">Sequential Row Index Split</option>
+            {% endif %}
+          </select>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+            Strict featurization ordering: The model is fitted only on the training set.
+          </div>
+        </div>
+      </div>
+
+      <!-- Predictor Variables Multi-Select -->
+      <div class="form-group" style="margin-top: 8px;">
+        <label class="form-label">
+          Predictor Variables (Independent Variables <i>X</i>) <span style="color: var(--danger);">*</span>
+        </label>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; background: #f8fafc; border: 1px solid var(--border-light); padding: 14px; border-radius: var(--radius-md);">
+          {% for col in numeric_columns %}
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+              <input type="checkbox" name="predictors" value="{{ col }}" class="predictor-check"
+                     {% if col in default_predictors %}checked{% endif %}
+                     {% if col == default_target %}disabled{% endif %}>
+              <span>{{ col }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+          Choose explanatory variables. Target variable is excluded automatically.
+        </div>
+      </div>
+
+      <!-- Test Split Ratio Slider -->
+      <div class="grid-2" style="align-items: center; margin-top: 10px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label" for="testSizeRange">
+            Holdout Test Evaluation Size: <strong id="testSizeLabel">20%</strong>
+          </label>
+          <input type="range" id="testSizeRange" min="10" max="40" step="5" value="20" style="width: 100%;">
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+          <button type="submit" id="btnTrainModel" class="btn btn-primary" style="padding: 10px 20px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+            Fit & Evaluate Linear Regression
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="trainingSpinner" style="display: none; text-align: center; padding: 30px;">
+  <div style="font-size: 13px; color: var(--primary); font-weight: 600;">Fitting OLS Linear Regression & Calculating Error Metrics...</div>
+</div>
+
+<!-- Model Results Section (Hidden until trained or populated from existing model) -->
+<div id="modelResultsSection" style="display: none;">
+  <!-- Metric KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">R² (Determination)</div>
+      <div class="kpi-value" id="resR2">0.0000</div>
+      <div class="kpi-subtext" id="resFitQuality">Variance explained on test set</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">MAE (Mean Absolute Error)</div>
+      <div class="kpi-value" id="resMAE">{{ 0 | currency }}</div>
+      <div class="kpi-subtext">Average magnitude of errors</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">RMSE (Root Mean Squared)</div>
+      <div class="kpi-value" id="resRMSE">{{ 0 | currency }}</div>
+      <div class="kpi-subtext">Penalizes large outlier errors</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Training R²</div>
+      <div class="kpi-value" id="resTrainR2">0.0000</div>
+      <div class="kpi-subtext" id="resOverfitCheck">Overfitting diagnostic</div>
+    </div>
+  </div>
+
+  <!-- Mathematical Regression Equation -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Estimated Mathematical Regression Equation</div>
+      <span class="badge badge-success">Ordinary Least Squares</span>
+    </div>
+    <div class="panel-body">
+      <div id="resEquation" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; background: #f1f5f9; padding: 14px 18px; border-radius: var(--radius-md); color: #1e293b; overflow-x: auto; white-space: nowrap;">
+      </div>
+      <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+        Linear form: <i>y = β₀ + β₁X₁ + β₂X₂ + ... + ε</i>. Coefficients reflect marginal change in target per 1-unit increase in predictor, holding others constant.
+      </div>
+    </div>
+  </div>
+
+  <!-- Coefficients Table & Visual Weight -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Feature Coefficients & Marginal Weights</div>
+      <div class="panel-subtitle">Estimated beta parameters and baseline intercept</div>
+    </div>
+    <div class="panel-body" style="padding: 0;">
+      <div class="table-responsive">
+        <table class="custom-table" id="coefficientsTable">
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Parameter Type</th>
+              <th>Estimated Weight (β)</th>
+              <th>Marginal Interpretation</th>
+            </tr>
+          </thead>
+          <tbody id="coefficientsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actual vs Predicted & Residuals Charts -->
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Actual vs. Predicted Values</div>
+        <div class="panel-subtitle">Model fit tracking across observations</div>
+      </div>
+      <div class="panel-body">
+        <div style="height: 280px; position: relative;">
+          <canvas id="actualVsPredChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Residual Distribution (e = y - ŷ)</div>
+        <div class="panel-subtitle">Evaluating residual randomness and homoscedasticity</div>
+      </div>
+      <div class="panel-body">
+        <div style="height: 280px; position: relative;">
+          <canvas id="residualChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Next Step CTA -->
+  <div style="margin-top: 24px; text-align: right;">
+    <a href="{{ url_for('forecast.view_forecast', analysis_id=analysis.id) }}" class="btn btn-primary" style="padding: 10px 24px;">
+      Use This Fitted Model for Sales Forecasting &rarr;
+    </a>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.existingModels = {{ models | tojson if models else '[]' }};
+</script>
+<script src="{{ url_for('static', filename='js/regression.js') }}"></script>
+{% endblock %}

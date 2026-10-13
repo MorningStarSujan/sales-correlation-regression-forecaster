@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}Sales Forecasting | Sales Forecaster{% endblock %}
+{% block page_title %}Sales Forecasting & Scenario Engine{% endblock %}
+
+{% block topbar_actions %}
+  <a href="{{ url_for('regression.view_regression', analysis_id=analysis.id) }}" class="btn btn-secondary btn-sm">
+    &larr; Back to Regression
+  </a>
+  <a href="{{ url_for('export.reports_page', analysis_id=analysis.id) }}" class="btn btn-primary btn-sm">
+    Export Forecast Report &rarr;
+  </a>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+  <div>
+    <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">
+      Sales Forecasting &bull; <span style="color: var(--primary);">{{ analysis.title }}</span>
+    </h2>
+    <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+      Predict future sales using empirical Linear Regression models &bull; Never invents missing inputs
+    </p>
+  </div>
+</div>
+
+{% if not models %}
+  <!-- No Model Warning -->
+  <div class="panel" style="text-align: center; padding: 40px 20px;">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="1.5" style="margin-bottom: 12px;">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="8" x2="12" y2="12"></line>
+      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+    </svg>
+    <h3 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">
+      No Linear Regression Model Trained Yet
+    </h3>
+    <p style="font-size: 13px; color: var(--text-secondary); max-width: 500px; margin: 0 auto 16px;">
+      Forecasting requires a trained linear regression model to establish coefficients between your target sales and predictor features.
+    </p>
+    <a href="{{ url_for('regression.view_regression', analysis_id=analysis.id) }}" class="btn btn-primary">
+      Fit Linear Regression Model Now &rarr;
+    </a>
+  </div>
+{% else %}
+
+  <!-- Active Model Selector & KPI Header -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-title">Active Predictive Model</div>
+        <div class="panel-subtitle">Select which trained model specification to utilize for forecasting</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label for="modelSelect" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">Model:</label>
+        <select id="modelSelect" class="form-select" style="width: auto; padding: 5px 10px; font-size: 12px;">
+          {% for m in models %}
+            <option value="{{ m.id }}" {% if loop.first %}selected{% endif %}>
+              Predicting {{ m.target_variable }} (R² = {{ "%.3f"|format(m.r2_score) }}, RMSE = {{ m.rmse | currency }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="panel-body" style="padding: 14px 20px;">
+      <div id="activeModelSummary" style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 13px;">
+        <div><strong>Target Variable:</strong> <span id="sumTarget">{{ selected_model.target_variable }}</span></div>
+        <div><strong>R² Score:</strong> <span id="sumR2" class="badge badge-success">{{ "%.4f"|format(selected_model.r2_score) }}</span></div>
+        <div><strong>Model RMSE:</strong> <span id="sumRMSE">{{ selected_model.rmse | currency }}</span></div>
+        <div><strong>Predictors:</strong> <span id="sumPredictors" style="color: var(--text-secondary);">{{ selected_model.predictor_variables | join(', ') }}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Forecast Mode Navigation -->
+  <div style="display: flex; gap: 10px; margin-bottom: 18px;">
+    <button type="button" class="btn btn-primary btn-sm mode-tab active" data-tab="tabScenario">
+      Mode 1: What-If Scenario Forecast
+    </button>
+    <button type="button" class="btn btn-secondary btn-sm mode-tab" data-tab="tabHorizon">
+      Mode 2: Multi-Period Horizon Projector
+    </button>
+  </div>
+
+  <!-- TAB 1: What-If Scenario Simulator -->
+  <div id="tabScenario" class="forecast-tab-content">
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Interactive Scenario Simulator</div>
+          <div class="panel-subtitle">Provide prospective operational inputs to compute deterministic expected sales</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="scenarioForm">
+          <div class="grid-3" id="scenarioInputsContainer">
+            <!-- Populated dynamically based on selected model's predictors -->
+          </div>
+
+          <div style="margin-top: 18px; display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary" id="btnCalculateScenario">
+              Calculate Scenario Forecast
+            </button>
+          </div>
+        </form>
+
+        <!-- Scenario Output Card -->
+        <div id="scenarioResultBox" style="display: none; margin-top: 24px; border-top: 1px solid var(--border-light); padding-top: 20px;">
+          <!-- Extrapolation Warnings -->
+          <div id="extrapolationNotice" class="alert alert-warning" style="display: none;"></div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card" style="border-left: 4px solid var(--primary);">
+              <div class="kpi-label">Forecasted Sales</div>
+              <div class="kpi-value" id="scenPredicted" style="color: var(--primary);">{{ 0 | currency }}</div>
+              <div class="kpi-subtext">Deterministic linear point estimate</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">95% Prediction Bounds</div>
+              <div class="kpi-value" id="scenBounds" style="font-size: 18px; margin-top: 5px;">{{ 0 | currency }} – {{ 0 | currency }}</div>
+              <div class="kpi-subtext">± 1.96 × Model RMSE margin</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Uncertainty Margin</div>
+              <div class="kpi-value" id="scenMargin">{{ 0 | currency }}</div>
+              <div class="kpi-subtext">Empirical standard error tolerance</div>
+            </div>
+          </div>
+
+          <!-- Factor Contribution Table -->
+          <h4 style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 16px 0 10px;">
+            Feature Contribution Decomposition
+          </h4>
+          <div class="table-responsive">
+            <table class="custom-table" id="scenContribTable">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Input Value</th>
+                  <th>Model Weight (β)</th>
+                  <th>Contribution to Forecast</th>
+                </tr>
+              </thead>
+              <tbody id="scenContribBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: Multi-Period Horizon Projector -->
+  <div id="tabHorizon" class="forecast-tab-content" style="display: none;">
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Multi-Period Forward Projection</div>
+          <div class="panel-subtitle">Project sales forward into future chronological intervals</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="horizonForm">
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="horizonPeriods">Forecast Horizon</label>
+              <select id="horizonPeriods" class="form-select">
+                <option value="3">Next 3 Periods / Months</option>
+                <option value="6" selected>Next 6 Periods / Months</option>
+                <option value="12">Next 12 Periods / Months</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="growthRatePct">
+                Assumed Predictor Trend Growth Rate (% per period): <strong id="growthRateLabel">0.0%</strong>
+              </label>
+              <input type="range" id="growthRatePct" min="-10" max="20" step="1" value="0" style="width: 100%;">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary" id="btnCalculateHorizon">
+              Generate Horizon Projection
+            </button>
+          </div>
+        </form>
+
+        <!-- Horizon Chart & Table Output -->
+        <div id="horizonResultBox" style="display: none; margin-top: 24px; border-top: 1px solid var(--border-light); padding-top: 20px;">
+          <div style="height: 300px; position: relative; margin-bottom: 24px;">
+            <canvas id="horizonChart"></canvas>
+          </div>
+
+          <h4 style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px;">
+            Projected Forecast Schedule (With 95% Confidence Bounds)
+          </h4>
+          <div class="table-responsive">
+            <table class="custom-table" id="horizonTable">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Forecasted Sales</th>
+                  <th>Lower Bound (95%)</th>
+                  <th>Upper Bound (95%)</th>
+                  <th>Assumed Predictor Levels</th>
+                </tr>
+              </thead>
+              <tbody id="horizonBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section: Statistical Assumptions & Limitations -->
+  <div class="panel" style="margin-top: 24px;">
+    <div class="panel-header">
+      <div class="panel-title">Model Assumptions, Data Requirements & Limitations</div>
+      <span class="badge badge-neutral">Methodological Governance</span>
+    </div>
+    <div class="panel-body">
+      <div class="grid-2" style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+        <div>
+          <strong style="color: var(--text-primary); display: block; margin-bottom: 4px;">Underlying Assumptions:</strong>
+          <ul style="padding-left: 18px;">
+            <li><strong>Linearity:</strong> The relationship between predictors and sales is assumed to be linear.</li>
+            <li><strong>Temporal Stationarity:</strong> Assumes historical coefficients remain stable across future intervals.</li>
+            <li><strong>Residual Normality:</strong> Prediction bounds rely on homoscedastic, normally distributed residuals.</li>
+          </ul>
+        </div>
+        <div>
+          <strong style="color: var(--text-primary); display: block; margin-bottom: 4px;">Known Limitations:</strong>
+          <ul style="padding-left: 18px;">
+            <li><strong>No Extrapolation Guarantee:</strong> Inputs significantly higher or lower than historical ranges carry heightened uncertainty.</li>
+            <li><strong>External Shocks:</strong> Unmeasured market events (macroeconomics, competitor moves) cannot be predicted by this model.</li>
+            <li><strong>Non-Causality:</strong> OLS captures historical statistical correlation rather than controlled causality.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.forecastConfig = {
+    analysisId: "{{ analysis.id }}",
+    models: {{ models | tojson if models else '[]' }},
+    descriptiveStats: {{ descriptive_stats | tojson if descriptive_stats else '{}' }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/forecast.js') }}"></script>
+{% endblock %}

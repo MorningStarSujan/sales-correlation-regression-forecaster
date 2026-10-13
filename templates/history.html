@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis History & Comparison | Sales Forecaster{% endblock %}
+{% block page_title %}Analysis History & Dataset Comparison{% endblock %}
+
+{% block content %}
+<!-- Section 1: Analysis Repository Table -->
+<div class="panel">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Stored Analysis History</div>
+      <div class="panel-subtitle">Persisted in local SQLite database with unique IDs</div>
+    </div>
+    <span class="badge badge-primary">{{ analyses | length }} Total Records</span>
+  </div>
+  <div class="panel-body" style="padding: 0;">
+    {% if analyses %}
+      <div class="table-responsive">
+        <table class="custom-table" id="historyTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Analysis Title</th>
+              <th>Dataset File</th>
+              <th>Rows</th>
+              <th>Revenue</th>
+              <th>Units Sold</th>
+              <th>Created Date</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in analyses %}
+              <tr id="row-{{ a.id }}">
+                <td><code style="font-size: 11px;">{{ a.id }}</code></td>
+                <td><strong class="analysis-title-text" id="title-text-{{ a.id }}">{{ a.title }}</strong></td>
+                <td>
+                  <span class="badge badge-neutral">{{ a.dataset_filename }}</span>
+                  {% if a.dataset_source == 'sample' %}
+                    <span class="badge badge-neutral" title="Built-in demonstration dataset">Sample</span>
+                  {% endif %}
+                </td>
+                <td>{{ a.row_count | number_fmt }}</td>
+                <td>{{ a.summary_stats.total_revenue | currency }}</td>
+                <td>{{ a.summary_stats.total_units | number_fmt }}</td>
+                <td style="color: var(--text-muted);">{{ a.created_at[:10] }}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                  <a href="{{ url_for('analysis.view_analysis', analysis_id=a.id) }}" class="btn btn-secondary btn-sm" title="Open Analysis">
+                    Open
+                  </a>
+                  <button type="button" class="btn btn-secondary btn-sm btn-rename" data-id="{{ a.id }}" data-title="{{ a.title }}" title="Rename Analysis">
+                    Rename
+                  </button>
+                  <button type="button" class="btn btn-danger btn-sm btn-delete" data-id="{{ a.id }}" title="Delete Record">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+        No analysis records stored in database yet.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Section 2: Dataset Comparison Engine -->
+<div class="panel" style="margin-top: 28px;">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Compare Historical Datasets</div>
+      <div class="panel-subtitle">Evaluate performance differences, schema compatibility, and metric variance</div>
+    </div>
+    <span class="badge badge-neutral">Comparative Diagnostics</span>
+  </div>
+  <div class="panel-body">
+    {% if analyses|length >= 2 %}
+      <form id="compareForm">
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label" for="compareIdA">Dataset / Analysis A (Baseline)</label>
+            <select id="compareIdA" class="form-select" required>
+              {% for a in analyses %}
+                <option value="{{ a.id }}" {% if loop.first %}selected{% endif %}>
+                  {{ a.title }} ({{ a.dataset_filename }}, {{ a.created_at[:10] }})
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="compareIdB">Dataset / Analysis B (Comparison Target)</label>
+            <select id="compareIdB" class="form-select" required>
+              {% for a in analyses %}
+                <option value="{{ a.id }}" {% if loop.index == 2 %}selected{% endif %}>
+                  {{ a.title }} ({{ a.dataset_filename }}, {{ a.created_at[:10] }})
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end;">
+          <button type="submit" class="btn btn-primary" id="btnRunCompare">
+            Compare Datasets & Analyze Differences &rarr;
+          </button>
+        </div>
+      </form>
+
+      <!-- Comparison Output Container -->
+      <div id="compareResults" style="display: none; margin-top: 24px; border-top: 1px solid var(--border-light); padding-top: 20px;">
+        
+        <!-- Warnings Banner -->
+        <div id="compareWarningsContainer"></div>
+
+        <!-- Comparative KPI Delta Grid -->
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;">
+          Core Metric Differences & Growth Rates
+        </h4>
+        <div class="kpi-grid" id="compareKpiGrid"></div>
+
+        <!-- Schema Differences Table -->
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 24px 0 12px;">
+          Schema & Column Compatibility Inspection
+        </h4>
+        <div class="table-responsive">
+          <table class="custom-table" id="compareSchemaTable">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Attributes / Fields</th>
+                <th>Compatibility Impact</th>
+              </tr>
+            </thead>
+            <tbody id="compareSchemaBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    {% else %}
+      <div style="text-align: center; padding: 24px; color: var(--text-secondary); font-size: 13px;">
+        Dataset comparison requires at least <strong>two</strong> stored analyses in the SQLite repository. 
+        Upload a second sales file or run another analysis to unlock comparison diagnostics.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Rename Modal -->
+<div id="renameModal" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); z-index: 1000; align-items: center; justify-content: center;">
+  <div style="background: #ffffff; border-radius: var(--radius-lg); width: 100%; max-width: 440px; padding: 24px; box-shadow: var(--shadow-md);">
+    <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">Rename Analysis Title</h3>
+    <input type="hidden" id="renameId">
+    <div class="form-group">
+      <label class="form-label" for="renameInput">New Title</label>
+      <input type="text" id="renameInput" class="form-control" required>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+      <button type="button" class="btn btn-secondary btn-sm" id="btnCancelRename">Cancel</button>
+      <button type="button" class="btn btn-primary btn-sm" id="btnSaveRename">Save Title</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/compare.js') }}"></script>
+{% endblock %}

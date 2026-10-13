@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Sales Correlation & Regression Forecaster{% endblock %}
+{% block page_title %}Sales Performance Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  <button id="btnLoadSample" class="btn btn-secondary btn-sm" title="Instant academic demo data">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+    Load Sample Data
+  </button>
+  <a href="{{ url_for('upload.upload_page') }}" class="btn btn-primary btn-sm">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+    Upload Dataset
+  </a>
+{% endblock %}
+
+{% block content %}
+{% if active_analysis %}
+  <!-- Active Dataset Header -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+    <div>
+      <h2 style="font-size: 15px; font-weight: 600; color: var(--text-primary);">
+        Active Dataset: <span style="color: var(--primary);">{{ active_analysis.dataset_filename }}</span>
+        {% if active_analysis.dataset_source == 'sample' %}
+          <span class="badge badge-neutral" style="margin-left: 6px;">Sample Data</span>
+        {% else %}
+          <span class="badge badge-primary" style="margin-left: 6px;">Uploaded Data</span>
+        {% endif %}
+      </h2>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+        {{ active_analysis.title }} &bull; {{ active_analysis.row_count }} records analyzed &bull; {{ active_analysis.summary_stats.date_range_str }}
+      </p>
+    </div>
+    <div>
+      <a href="{{ url_for('analysis.view_analysis', analysis_id=active_analysis.id) }}" class="btn btn-secondary btn-sm">
+        View In-Depth Analysis &rarr;
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Metrics Grid -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Revenue</div>
+      <div class="kpi-value">{{ active_analysis.summary_stats.total_revenue | currency }}</div>
+      <div class="kpi-subtext">Sum of recognized sales revenue</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Units Sold</div>
+      <div class="kpi-value">{{ active_analysis.summary_stats.total_units | number_fmt }}</div>
+      <div class="kpi-subtext">Cumulative volume across products</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Average Transaction Sale</div>
+      <div class="kpi-value">{{ active_analysis.summary_stats.average_sale | currency }}</div>
+      <div class="kpi-subtext">Median: {{ active_analysis.summary_stats.median_sale | currency }}</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Sales Growth Rate</div>
+      {% if active_analysis.summary_stats.sales_growth_rate is not none %}
+        <div class="kpi-value {% if active_analysis.summary_stats.sales_growth_rate >= 0 %}text-success{% else %}text-danger{% endif %}">
+          {{ active_analysis.summary_stats.sales_growth_rate | pct_fmt }}
+        </div>
+        <div class="kpi-subtext {% if active_analysis.summary_stats.sales_growth_rate >= 0 %}positive{% else %}negative{% endif %}">
+          Period-over-period momentum
+        </div>
+      {% else %}
+        <div class="kpi-value" style="font-size: 18px; color: var(--text-muted); margin-top: 4px;">N/A</div>
+        <div class="kpi-subtext">Requires sequential temporal column</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Interactive Charts Grid -->
+  <div class="grid-2">
+    <!-- Chart 1: Time Series Trend -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Sales & Volume Trajectory</div>
+          <div class="panel-subtitle">Historical chronological aggregated trends</div>
+        </div>
+        <span class="badge badge-primary">{{ active_analysis.summary_stats.time_series.granularity | upper }}</span>
+      </div>
+      <div class="panel-body">
+        {% if active_analysis.summary_stats.time_series.labels %}
+          <div style="height: 280px; position: relative;">
+            <canvas id="salesTrendChart"></canvas>
+          </div>
+        {% else %}
+          <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+            No temporal date column detected to render time series.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Chart 2: Product Breakdown -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Product Category Revenue Share</div>
+          <div class="panel-subtitle">Revenue distribution by category</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        {% if active_analysis.summary_stats.product_summary %}
+          <div style="height: 280px; position: relative;">
+            <canvas id="productChart"></canvas>
+          </div>
+        {% else %}
+          <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+            No product or category column detected.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+{% else %}
+  <!-- Empty State -->
+  <div class="panel" style="text-align: center; padding: 48px 24px;">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5" style="margin-bottom: 16px;">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+      <polyline points="17 8 12 3 7 8"></polyline>
+      <line x1="12" y1="3" x2="12" y2="15"></line>
+    </svg>
+    <h3 style="font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">No Sales Datasets Uploaded Yet</h3>
+    <p style="font-size: 13px; color: var(--text-secondary); max-width: 480px; margin: 0 auto 20px;">
+      Upload an Excel or CSV sales transaction file to automatically compute key metrics, correlation drivers, and train linear regression forecasting models.
+    </p>
+    <div style="display: flex; justify-content: center; gap: 12px;">
+      <button id="btnEmptyLoadSample" class="btn btn-primary">
+        Load Built-in Sample Sales Data
+      </button>
+      <a href="{{ url_for('upload.upload_page') }}" class="btn btn-secondary">
+        Upload Your Own CSV/Excel
+      </a>
+    </div>
+  </div>
+{% endif %}
+
+<!-- Recent Analyses Section -->
+<div class="panel" style="margin-top: 24px;">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Recent Analyses Repository</div>
+      <div class="panel-subtitle">Stored in local SQLite database</div>
+    </div>
+    <a href="{{ url_for('history.view_history') }}" class="btn btn-secondary btn-sm">View All in History</a>
+  </div>
+  <div class="panel-body" style="padding: 0;">
+    {% if latest_analyses %}
+      <div class="table-responsive">
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Analysis Title</th>
+              <th>Dataset File</th>
+              <th>Records</th>
+              <th>Total Revenue</th>
+              <th>Created Date</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for an in latest_analyses %}
+              <tr>
+                <td><strong>{{ an.title }}</strong></td>
+                <td>
+                  <span class="badge badge-neutral">{{ an.dataset_filename }}</span>
+                  {% if an.dataset_source == 'sample' %}
+                    <span class="badge badge-neutral" title="Built-in demonstration dataset">Sample</span>
+                  {% endif %}
+                </td>
+                <td>{{ an.row_count | number_fmt }}</td>
+                <td>{{ an.total_revenue | currency }}</td>
+                <td style="color: var(--text-muted);">{{ an.created_at[:10] }}</td>
+                <td style="text-align: right;">
+                  <a href="{{ url_for('analysis.view_analysis', analysis_id=an.id) }}" class="btn btn-secondary btn-sm">
+                    Open Analysis
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+        No previous analysis records found.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.dashboardData = {
+    hasData: {{ 'true' if active_analysis else 'false' }},
+    timeSeries: {{ active_analysis.summary_stats.time_series | tojson if active_analysis else '{}' }},
+    products: {{ active_analysis.summary_stats.product_summary | tojson if active_analysis else '[]' }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

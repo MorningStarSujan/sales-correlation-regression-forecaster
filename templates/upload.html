@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Data Upload & Validation | Sales Forecaster{% endblock %}
+{% block page_title %}Upload & Validate Dataset{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+
+  <!-- Step 1: Upload Zone -->
+  <div class="panel" id="uploadCard">
+    <div class="panel-header">
+      <div>
+        <div class="panel-title">1. Select or Drop Sales Dataset</div>
+        <div class="panel-subtitle">Accepts standard Excel (.xlsx, .xls) and Comma-Separated Values (.csv)</div>
+      </div>
+      <button id="btnLoadSampleInline" class="btn btn-secondary btn-sm">Use Built-in Sample File</button>
+    </div>
+    <div class="panel-body">
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-icon">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </div>
+        <p style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
+          Drag and drop your sales file here, or click to browse
+        </p>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+          Maximum file size: 16 MB. Supported formats: .CSV, .XLSX, .XLS
+        </p>
+        <input type="file" id="fileInput" accept=".csv, .xlsx, .xls" style="display: none;">
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+          Browse Local Files
+        </button>
+      </div>
+
+      <div id="uploadProgress" style="display: none; margin-top: 18px;">
+        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;" id="uploadStatusText">
+          Validating schema and calculating statistics...
+        </div>
+        <div style="height: 6px; background: var(--border-light); border-radius: 3px; overflow: hidden;">
+          <div id="progressBar" style="width: 100%; height: 100%; background: var(--primary); animation: pulse 1.5s infinite;"></div>
+        </div>
+      </div>
+      
+      <div id="uploadError" class="alert alert-danger" style="display: none; margin-top: 16px;"></div>
+    </div>
+  </div>
+
+  <!-- Step 2: Validation & Schema Inspection (Revealed after upload) -->
+  <div id="validationSection" style="display: none;">
+    <!-- Quality Summary Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Rows</div>
+        <div class="kpi-value" id="valRows">0</div>
+        <div class="kpi-subtext">Total records read from file</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Columns</div>
+        <div class="kpi-value" id="valCols">0</div>
+        <div class="kpi-subtext">Detected fields</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Duplicates</div>
+        <div class="kpi-value" id="valDups">0</div>
+        <div class="kpi-subtext" id="valDupPct">0% duplicate rows</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Data Integrity</div>
+        <div class="kpi-value" id="valIntegrity" style="font-size: 18px; margin-top: 4px;">Clean</div>
+        <div class="kpi-subtext" id="valIntegritySub">All required values present</div>
+      </div>
+    </div>
+
+    <!-- Step 3: Column Mapping & Confirmation -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">2. Automated Column Detection & Mapping</div>
+          <div class="panel-subtitle">Review detected roles or adjust to suit your data layout</div>
+        </div>
+        <span class="badge badge-primary">Auto-Configured</span>
+      </div>
+      <div class="panel-body">
+        <form id="mappingForm">
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="mapSalesCol">
+                Target Sales / Revenue Column <span style="color: var(--danger);">*</span>
+              </label>
+              <select id="mapSalesCol" class="form-select" required></select>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                Numerical revenue or transaction amount used for core KPIs and regression target.
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="mapDateCol">
+                Chronological Date Column (Optional but recommended)
+              </label>
+              <select id="mapDateCol" class="form-select"></select>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                Used for trend charting, period growth rate, and chronological train/test splitting.
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="mapUnitsCol">
+                Units / Quantity Sold Column (Optional)
+              </label>
+              <select id="mapUnitsCol" class="form-select"></select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="mapProductCol">
+                Product / Category Column (Optional)
+              </label>
+              <select id="mapProductCol" class="form-select"></select>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-light); margin: 16px 0; padding-top: 16px;">
+            <div class="form-group">
+              <label class="form-label" for="analysisTitle">Analysis Title</label>
+              <input type="text" id="analysisTitle" class="form-control" placeholder="e.g. Q1-Q4 Retail Performance Analysis" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="analysisDesc">Description / Context (Optional)</label>
+              <textarea id="analysisDesc" class="form-control" rows="2" placeholder="Brief notes regarding the dataset origin, currency, or market assumptions..."></textarea>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn btn-secondary" onclick="location.reload()">Cancel</button>
+            <button type="submit" id="btnConfirmMapping" class="btn btn-primary">
+              Confirm & Run Automated Analysis &rarr;
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Step 4: Data Preview Table -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">3. Dataset Preview (First 15 Rows)</div>
+          <div class="panel-subtitle">Inspect raw loaded data rows and columns</div>
+        </div>
+      </div>
+      <div class="panel-body" style="padding: 0;">
+        <div class="table-responsive">
+          <table class="custom-table" id="previewTable">
+            <thead id="previewHead"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}

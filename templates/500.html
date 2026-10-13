@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}500 - Server Error | Sales Forecaster{% endblock %}
+{% block page_title %}Internal Processing Error{% endblock %}
+
+{% block content %}
+<div class="panel" style="text-align: center; padding: 48px 24px; max-width: 600px; margin: 40px auto;">
+  <h2 style="font-size: 32px; font-weight: 700; color: var(--danger); margin-bottom: 8px;">500</h2>
+  <h3 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">A server-side statistical error occurred</h3>
+  <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+    An unexpected issue occurred while processing the sales calculation:
+  </p>
+  {% if error %}
+    <div style="font-family: monospace; font-size: 12px; background: #fef2f2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-md); margin-bottom: 20px; text-align: left; overflow-x: auto;">
+      {{ error }}
+    </div>
+  {% endif %}
+  <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">
+    Return to Dashboard
+  </a>
+</div>
+{% endblock %}

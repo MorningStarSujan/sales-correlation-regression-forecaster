@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Sales Analysis & Correlation | Sales Forecaster{% endblock %}
+{% block page_title %}Automated Sales & Correlation Analysis{% endblock %}
+
+{% block topbar_actions %}
+  <div class="currency-selector-wrapper" title="Select currency across application">
+    <label for="currencySelector" class="currency-label">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>Currency:</span>
+    </label>
+    <select id="currencySelector" class="form-select currency-select" aria-label="Select Currency">
+      {% for code, cur in available_currencies.items() %}
+        <option value="{{ code }}" {% if code == current_currency_code %}selected{% endif %}>
+          {{ cur.flag }} {{ cur.code }} ({{ cur.symbol }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <a href="{{ url_for('export.export_pdf', analysis_id=analysis.id, currency=current_currency_code) }}" class="btn btn-secondary btn-sm" id="btnExportPdf" target="_blank">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+    Export PDF
+  </a>
+  <a href="{{ url_for('regression.view_regression', analysis_id=analysis.id) }}" class="btn btn-primary btn-sm">
+    Proceed to Linear Regression &rarr;
+  </a>
+{% endblock %}
+
+{% block content %}
+<!-- Analysis Metadata Header -->
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+  <div>
+    <h2 style="font-size: 16px; font-weight: 600; color: var(--text-primary);">{{ analysis.title }}</h2>
+    <p style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
+      Source: <strong>{{ analysis.dataset_filename }}</strong> ({{ analysis.row_count }} rows) &bull; 
+      Date Span: <strong>{{ stats.date_range_str }}</strong>
+    </p>
+    {% if analysis.description %}
+      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">{{ analysis.description }}</p>
+    {% endif %}
+  </div>
+  <div style="text-align: right;">
+    <span class="badge badge-primary">ID: {{ analysis.id }}</span><br style="margin-bottom: 4px;">
+    {% if analysis.dataset_source == 'sample' %}
+      <span class="badge badge-neutral" style="margin-top: 4px; display: inline-block;">Sample Data</span>
+    {% else %}
+      <span class="badge badge-neutral" style="margin-top: 4px; display: inline-block;">Uploaded Data</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Revenue</div>
+    <div class="kpi-value" id="analysisTotalRevenue" data-raw-val="{{ stats.total_revenue }}">{{ stats.total_revenue | currency }}</div>
+    <div class="kpi-subtext">Sum of sales column</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Units Sold</div>
+    <div class="kpi-value">{{ stats.total_units | number_fmt }}</div>
+    <div class="kpi-subtext">Cumulative units</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Average Sale</div>
+    <div class="kpi-value" id="analysisAvgSale" data-raw-val="{{ stats.average_sale }}">{{ stats.average_sale | currency }}</div>
+    <div class="kpi-subtext" id="analysisStdSale" data-raw-val="{{ stats.std_sale }}">Std Dev: {{ stats.std_sale | currency }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Period Growth Rate</div>
+    {% if stats.sales_growth_rate is not none %}
+      <div class="kpi-value {% if stats.sales_growth_rate >= 0 %}text-success{% else %}text-danger{% endif %}">
+        {{ stats.sales_growth_rate | pct_fmt }}
+      </div>
+      <div class="kpi-subtext">Half-over-half momentum</div>
+    {% else %}
+      <div class="kpi-value" style="font-size: 18px; color: var(--text-muted); margin-top: 4px;">N/A</div>
+      <div class="kpi-subtext">Requires sequential time data</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Section: Time Series & Product Performance -->
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Sales Trajectory Over Time</div>
+      <span class="badge badge-neutral">{{ stats.time_series.granularity | upper }}</span>
+    </div>
+    <div class="panel-body">
+      {% if stats.time_series.labels %}
+        <div style="height: 270px; position: relative;">
+          <canvas id="analysisTrendChart"></canvas>
+        </div>
+      {% else %}
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          No sequential date column mapped.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Product Category Breakdown</div>
+    </div>
+    <div class="panel-body" style="padding: 0;">
+      {% if stats.product_summary %}
+        <div class="table-responsive">
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th id="thProductRevenue">Revenue ({{ current_currency.symbol }})</th>
+                <th>Units</th>
+                <th>Contribution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in stats.product_summary %}
+                <tr>
+                  <td><strong>{{ p.product }}</strong></td>
+                  <td class="product-revenue-cell" data-raw-val="{{ p.sales }}">{{ p.sales | currency }}</td>
+                  <td>{{ p.units | number_fmt }}</td>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <div style="flex: 1; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ p.percentage }}%; height: 100%; background: var(--primary);"></div>
+                      </div>
+                      <span style="font-size: 11px; font-weight: 600; width: 38px;">{{ p.percentage }}%</span>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          No product/category column mapped.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Section: Correlation Analysis -->
+<div class="panel" style="margin-top: 24px;">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Variable Correlation Matrix & Driver Analysis</div>
+      <div class="panel-subtitle">Pearson correlation coefficients (r) measuring linear association between numerical features</div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <!-- Causation Disclaimer Banner -->
+    <div class="alert alert-info">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <div>
+        <strong>Scientific Principle: Correlation does NOT imply Causation.</strong><br>
+        A high correlation value (positive or negative) reflects statistical co-movement across observations, not that changes in one variable cause changes in the other. External market conditions, seasonal demand, or lurking variables may influence both simultaneously.
+      </div>
+    </div>
+
+    {% if corr.has_correlation %}
+      <!-- Heatmap Table -->
+      <div class="heatmap-container">
+        <table class="heatmap-table" id="corrHeatmapTable">
+          <thead>
+            <tr>
+              <th style="text-align: left; background: #f8fafc;">Feature</th>
+              {% for col in corr.columns %}
+                <th>{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row_col in corr.columns %}
+              {% set outer_loop = loop %}
+              <tr>
+                <td style="font-weight: 600; text-align: left; background: #f8fafc;">{{ row_col }}</td>
+                {% for col_col in corr.columns %}
+                  {% set r_val = corr.matrix[outer_loop.index0][loop.index0] %}
+                  <td data-r="{{ r_val }}" class="heatmap-cell" title="{{ row_col }} vs {{ col_col }}: r = {{ r_val }}">
+                    {{ "%+.3f"|format(r_val) }}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Top Driver Pairs Table -->
+      <div style="margin-top: 24px;">
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px;">
+          Key Statistical Relationships & Explanations
+        </h4>
+        <div class="table-responsive">
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Variable Pair</th>
+                <th>Pearson r</th>
+                <th>Association Strength</th>
+                <th>Factual Explanation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in corr.top_pairs %}
+                <tr>
+                  <td><strong>{{ p.var1 }}</strong> <span style="color: var(--text-muted);">&harr;</span> <strong>{{ p.var2 }}</strong></td>
+                  <td>
+                    <span class="badge {% if p.correlation > 0.4 %}badge-success{% elif p.correlation < -0.4 %}badge-danger{% else %}badge-neutral{% endif %}">
+                      {{ "%+.3f"|format(p.correlation) }}
+                    </span>
+                  </td>
+                  <td>{{ p.strength }} {{ p.direction }}</td>
+                  <td style="color: var(--text-secondary);">{{ p.interpretation }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+        {{ corr.message }}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Section: Descriptive Statistics & Data Quality -->
+<div class="grid-2" style="margin-top: 24px;">
+  <!-- Descriptive Stats -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Numerical Variable Summary Statistics</div>
+    </div>
+    <div class="panel-body" style="padding: 0;">
+      <div class="table-responsive">
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Mean</th>
+              <th>Std Dev</th>
+              <th>Min</th>
+              <th>Median</th>
+              <th>Max</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for col, s in stats.descriptive_stats.items() %}
+              <tr>
+                <td><strong>{{ col }}</strong></td>
+                <td>{{ s.mean }}</td>
+                <td>{{ s.std }}</td>
+                <td>{{ s.min }}</td>
+                <td>{{ s.median }}</td>
+                <td>{{ s.max }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Quality -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Data Quality & Schema Diagnostics</div>
+    </div>
+    <div class="panel-body" style="padding: 0;">
+      <div class="table-responsive">
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Detected Type</th>
+              <th>Missing Values</th>
+              <th>Unique Values</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for col in quality.columns %}
+              <tr>
+                <td><strong>{{ col.name }}</strong></td>
+                <td><span class="badge badge-neutral">{{ col.type | upper }}</span></td>
+                <td>
+                  {% if col.missing_count > 0 %}
+                    <span class="badge badge-warning">{{ col.missing_count }} ({{ col.missing_pct }}%)</span>
+                  {% else %}
+                    <span class="badge badge-success">0 (0%)</span>
+                  {% endif %}
+                </td>
+                <td>{{ col.unique_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.analysisData = {
+    timeSeries: {{ stats.time_series | tojson if stats.time_series else '{}' }},
+    corrMatrix: {{ corr.matrix | tojson if corr.has_correlation else '[]' }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+{% endblock %}

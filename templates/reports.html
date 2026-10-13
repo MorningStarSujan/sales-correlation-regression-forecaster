@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Reports & Exports | Sales Forecaster{% endblock %}
+{% block page_title %}Reports & Data Export Center{% endblock %}
+
+{% block content %}
+<div style="max-width: 900px; margin: 0 auto;">
+
+  <!-- Analysis Selector Card -->
+  <div class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-title">Select Analysis for Export</div>
+        <div class="panel-subtitle">Generate comprehensive PDF documentation or raw CSV summaries</div>
+      </div>
+    </div>
+    <div class="panel-body">
+      {% if analyses %}
+        <form method="GET" action="{{ url_for('export.reports_page') }}" style="display: flex; gap: 12px; align-items: flex-end;">
+          <div class="form-group" style="flex: 1; margin-bottom: 0;">
+            <label class="form-label" for="analysisSelect">Choose Stored Analysis</label>
+            <select name="analysis_id" id="analysisSelect" class="form-select" onchange="this.form.submit()">
+              {% for a in analyses %}
+                <option value="{{ a.id }}" {% if selected_analysis and selected_analysis.id == a.id %}selected{% endif %}>
+                  {{ a.title }} ({{ a.dataset_filename }}, {{ a.created_at[:10] }})
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <noscript>
+            <button type="submit" class="btn btn-secondary btn-sm">Load</button>
+          </noscript>
+        </form>
+      {% else %}
+        <div style="padding: 20px; text-align: center; color: var(--text-muted);">
+          No analysis records found. Please upload or analyze a dataset first.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if selected_analysis %}
+    <!-- Export Action Banner -->
+    <div class="panel" style="border: 2px solid var(--primary-border); background: #ffffff;">
+      <div class="panel-body" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+            {{ selected_analysis.title }}
+          </h3>
+          <p style="font-size: 12px; color: var(--text-secondary);">
+            Source: <strong>{{ selected_analysis.dataset_filename }}</strong> ({{ selected_analysis.row_count }} records) &bull; 
+            ID: <code style="font-size: 11px;">{{ selected_analysis.id }}</code>
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <a href="{{ url_for('export.export_pdf', analysis_id=selected_analysis.id) }}" class="btn btn-primary" style="padding: 9px 18px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            Download PDF Report
+          </a>
+
+          <a href="{{ url_for('export.export_csv', analysis_id=selected_analysis.id) }}" class="btn btn-secondary" style="padding: 9px 18px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download CSV Export
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Report Contents Preview -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Report Summary & Content Overview</div>
+        <span class="badge badge-success">Export Ready</span>
+      </div>
+      <div class="panel-body">
+        
+        <!-- Summary KPI Preview -->
+        <h4 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">
+          1. Key Metrics Included in Report
+        </h4>
+        <div class="kpi-grid" style="margin-bottom: 20px;">
+          <div class="kpi-card" style="padding: 12px 14px;">
+            <div class="kpi-label">Revenue</div>
+            <div class="kpi-value" style="font-size: 20px;">{{ selected_analysis.summary_stats.total_revenue | currency }}</div>
+          </div>
+          <div class="kpi-card" style="padding: 12px 14px;">
+            <div class="kpi-label">Units</div>
+            <div class="kpi-value" style="font-size: 20px;">{{ selected_analysis.summary_stats.total_units | number_fmt }}</div>
+          </div>
+          <div class="kpi-card" style="padding: 12px 14px;">
+            <div class="kpi-label">Average Sale</div>
+            <div class="kpi-value" style="font-size: 20px;">{{ selected_analysis.summary_stats.average_sale | currency }}</div>
+          </div>
+          <div class="kpi-card" style="padding: 12px 14px;">
+            <div class="kpi-label">Period Growth</div>
+            <div class="kpi-value" style="font-size: 20px;">{{ selected_analysis.summary_stats.sales_growth_rate | pct_fmt }}</div>
+          </div>
+        </div>
+
+        <!-- Regression Section Preview -->
+        <h4 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">
+          2. Fitted Regression Model Status
+        </h4>
+        {% if models %}
+          <div style="background: #f8fafc; border: 1px solid var(--border-light); padding: 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px;">
+            <div><strong>Target:</strong> {{ models[0].target_variable }}</div>
+            <div style="margin-top: 4px;"><strong>Predictors:</strong> {{ models[0].predictor_variables | join(', ') }}</div>
+            <div style="margin-top: 4px;"><strong>R²:</strong> {{ "%.4f"|format(models[0].r2_score) }} &bull; <strong>RMSE:</strong> {{ models[0].rmse | currency }} &bull; <strong>MAE:</strong> {{ models[0].mae | currency }}</div>
+          </div>
+        {% else %}
+          <div style="padding: 12px 14px; background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); font-size: 12px; color: #92400e; margin-bottom: 20px;">
+            No regression model trained for this analysis yet. The exported report will contain sales statistics and correlation drivers.
+          </div>
+        {% endif %}
+
+        <!-- Forecast Preview -->
+        <h4 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">
+          3. Forecast Projections
+        </h4>
+        {% if forecasts %}
+          <div style="background: #f8fafc; border: 1px solid var(--border-light); padding: 14px; border-radius: var(--radius-md); font-size: 13px;">
+            <div><strong>Active Forecasts:</strong> {{ forecasts | length }} projection record(s) attached to report.</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+              Forecast type: {{ forecasts[0].forecast_type | title }} &bull; Complete 95% confidence intervals and assumption notes included.
+            </div>
+          </div>
+        {% else %}
+          <div style="font-size: 12px; color: var(--text-muted);">
+            No explicit forecasts computed yet. Report will focus on historical performance and correlation drivers.
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}
